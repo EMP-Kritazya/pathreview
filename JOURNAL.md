@@ -24,3 +24,33 @@ The `POST /reviews` endpoint lets any logged-in user create a review for a profi
 - **Codebase readiness:** I've read the three service functions and confirmed the bug: `create_review()` takes `user_id` but never filters by it. The test file `tests/unit/test_review_service.py` exists, so I have existing tests to model my regression test on.
 
 - **Scope & time:** Small, well-bounded change plus one test — realistic within the Week 8–9 window alongside other commitments. No blockers or dependencies listed on the issue.
+
+## Week 8 — Reproduction & solution planning
+
+**Reproduction commit link:** <!-- TODO: paste the GitHub link to this Week 8 commit after pushing, e.g. https://github.com/EMP-Kritazya/pathreview/commit/<sha> -->
+
+**Reproduction summary:**
+I reproduced issue #163 by driving `create_review()` (in `core/services/review_service.py`)
+directly with a mismatched pair — an attacker `user_id` and a victim `profile_id` the
+attacker does not own — while tracking whether the service performs any ownership lookup.
+Observed: `create_review()` never issued an ownership query (`db.execute` was never called),
+called `db.add`, and returned a persisted `pending` review anyway. This confirms the IDOR:
+any authenticated user can create a review against another user's profile just by knowing
+its UUID, because `create_review()` accepts `user_id` but ignores it. The read paths
+(`get_review`, `list_reviews`) already scope by `Profile.user_id`, so only the create path
+is unprotected.
+
+**Reproduction steps:**
+1. From the fork root (`pathreview/`), with the app's virtualenv, call `create_review(db, profile_id, user_id)` with `profile_id` and `user_id` that do not correspond to the same profile (mocked DB session, patched `Review`).
+2. Assert whether any ownership `SELECT` is issued before the write.
+3. Observed result: no ownership check, `db.add` called, a review returned — i.e. the review is created for a profile the caller does not own.
+
+**PLAN.md link:** [PLAN.md](./PLAN.md) <!-- on GitHub: https://github.com/EMP-Kritazya/pathreview/blob/fix/163-review-creation-profile-ownership-error/PLAN.md -->
+
+**Walkthrough video (recommended):** [link to your Loom video, ≤2 min — recommended, not graded]
+
+**Blockers or open questions:**
+Deciding between `404` (matches `get_review`/`get_profile`, avoids leaking profile existence)
+and `403` for the rejected case — leaning `404` for consistency. Also whether to fix the
+pre-existing `AsyncMock().scalars()` failures in `tests/unit/test_review_service.py` as part
+of this PR or keep them out of scope (leaning out of scope).
