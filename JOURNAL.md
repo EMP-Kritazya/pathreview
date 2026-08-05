@@ -78,15 +78,15 @@ All 5 steps of PLAN.md are implemented and locally verified:
    pre-existing mock-quirk failures flagged in Week 8 — so that "leaning out of scope"
    call ended up moot, since it was needed to make the new/adjacent tests reliable.
 4. Verified the happy path manually against the running API (docker-compose postgres
-   + uvicorn): registered two users, created a profile for each, confirmed
-   `POST /reviews` with another user's `profile_id` returns `404` and creates nothing,
-   and `POST /reviews` with the caller's own `profile_id` returns `200` and the
-   background task completes the review end-to-end.
+   - uvicorn): registered two users, created a profile for each, confirmed
+     `POST /reviews` with another user's `profile_id` returns `404` and creates nothing,
+     and `POST /reviews` with the caller's own `profile_id` returns `200` and the
+     background task completes the review end-to-end.
 5. `make test-unit`: 20/20 tests pass in `tests/unit/test_review_service.py`; full
    suite is 389 passed / 40 failed, and I confirmed those 40 failures are pre-existing
-   and unrelated (bias_detector, pii_scrubber, tech_detector, etc. — none touch
+   and unrelated (bias*detector, pii_scrubber, tech_detector, etc. — none touch
    review/profile code) by running the same suite before my changes (53 failed / 375
-   passed at baseline — my change actually *fixes* 13 of those, the ones caused by the
+   passed at baseline — my change actually \_fixes* 13 of those, the ones caused by the
    mock-quirk in `test_review_service.py`). `make check` passes with no new lint/type
    errors introduced; two pre-existing mypy/type gaps in files I touched
    (`User.id`/`Review.id` stored as `str` vs. the `UUID` params services expect, and
@@ -108,16 +108,32 @@ type annotations rather than skipping the hook.
 
 ### Check-in 2 (end of week)
 
-**PR link:** [link to your submitted pull request]
+**PR link:** https://github.com/ascherj/pathreview/pull/912
 
-**Branch:** [the branch name you worked on, e.g. `fix/123-short-description`]
+**Branch:** `fix/163-review-creation-profile-ownership-error`
 
 **What you built:**
-[1–3 sentences summarizing what your fix does and how it works]
+`create_review()` in `core/services/review_service.py` now checks profile ownership
+before creating a review, by reusing the existing `profile_service.get_profile(db,
+profile_id, user_id)` lookup that already scopes by `Profile.user_id`. If the
+profile doesn't exist or isn't owned by the caller, `create_review()` returns
+`None` and `create_review_endpoint()` in `api/routes/reviews.py` responds `404`
+before any background processing is queued — closing the IDOR in issue #163
+without touching the read paths, which were already safe.
 
 **Tests added or updated:**
-[Which test files did you touch? What do they cover?]
+`tests/unit/test_review_service.py` — added
+`test_create_review_returns_none_for_unauthorized_profile` (asserts `create_review`
+returns `None` and never calls `db.add`/`commit`/`refresh` for a profile the caller
+doesn't own). Updated the other `create_review` tests to mock `get_profile` so the
+happy path still exercises `Review` construction, and replaced the
+`AsyncMock().scalars()` pattern with plain `Mock()` for `.scalars()` throughout the
+file, fixing several pre-existing mock-quirk failures unrelated to #163 along the
+way.
 
-**Self-review confirmation:** [ ] make check passes [ ] make test-unit passes
+**Self-review confirmation:** [x] make check passes [x] make test-unit passes
+(40 pre-existing, unrelated failures documented in the PR description — confirmed
+against a pre-change baseline of 53 failed/375 passed; this branch is 40 failed/389
+passed, so no new failures and 13 fewer than baseline)
 
-**Draft PR feedback received from:** [name or Slack handle, or "none"]
+**Draft PR feedback received from:** none yet
