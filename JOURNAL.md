@@ -41,6 +41,7 @@ its UUID, because `create_review()` accepts `user_id` but ignores it. The read p
 is unprotected.
 
 **Reproduction steps:**
+
 1. From the fork root (`pathreview/`), with the app's virtualenv, call `create_review(db, profile_id, user_id)` with `profile_id` and `user_id` that do not correspond to the same profile (mocked DB session, patched `Review`).
 2. Assert whether any ownership `SELECT` is issued before the write.
 3. Observed result: no ownership check, `db.add` called, a review returned — i.e. the review is created for a profile the caller does not own.
@@ -54,3 +55,69 @@ Deciding between `404` (matches `get_review`/`get_profile`, avoids leaking profi
 and `403` for the rejected case — leaning `404` for consistency. Also whether to fix the
 pre-existing `AsyncMock().scalars()` failures in `tests/unit/test_review_service.py` as part
 of this PR or keep them out of scope (leaning out of scope).
+
+## Week 9 — Solution building & PR submission
+
+### Check-in 1 (mid-week, 2026-08-04)
+
+**Current progress:**
+All 5 steps of PLAN.md are implemented and locally verified:
+
+1. `create_review()` in `core/services/review_service.py` now calls
+   `profile_service.get_profile(db, profile_id, user_id)` before constructing a
+   `Review`, and returns `None` when the profile is missing or not owned.
+2. `create_review_endpoint()` in `api/routes/reviews.py` checks for that `None`
+   and raises `HTTPException(404, "Profile not found")` before queuing the
+   `process_review` background task — matching the `404` decision noted as an
+   open question in the Week 8 entry.
+3. Added the regression test `test_create_review_returns_none_for_unauthorized_profile`
+   in `tests/unit/test_review_service.py`, plus updated the other `create_review`
+   tests to mock `get_profile` (they now patch it to return an owned profile so the
+   happy path still exercises `Review` construction). Also replaced the `AsyncMock().scalars()`
+   pattern with plain `Mock()` for `.scalars()` across the file, which resolves the
+   pre-existing mock-quirk failures flagged in Week 8 — so that "leaning out of scope"
+   call ended up moot, since it was needed to make the new/adjacent tests reliable.
+4. Verified the happy path manually against the running API (docker-compose postgres
+   + uvicorn): registered two users, created a profile for each, confirmed
+   `POST /reviews` with another user's `profile_id` returns `404` and creates nothing,
+   and `POST /reviews` with the caller's own `profile_id` returns `200` and the
+   background task completes the review end-to-end.
+5. `make test-unit`: 20/20 tests pass in `tests/unit/test_review_service.py`; full
+   suite is 389 passed / 40 failed, and I confirmed those 40 failures are pre-existing
+   and unrelated (bias_detector, pii_scrubber, tech_detector, etc. — none touch
+   review/profile code) by running the same suite before my changes (53 failed / 375
+   passed at baseline — my change actually *fixes* 13 of those, the ones caused by the
+   mock-quirk in `test_review_service.py`). `make check` passes with no new lint/type
+   errors introduced; two pre-existing mypy/type gaps in files I touched
+   (`User.id`/`Review.id` stored as `str` vs. the `UUID` params services expect, and
+   `Review.sections` typed as `dict | None` while `process_review` stores a list) were
+   fixed or explicitly annotated as pre-existing so the pre-commit hook's mypy check
+   passes without silently masking unrelated bugs.
+
+**Next steps:**
+Push the branch, open the PR against `ascherj/pathreview`, and fill in the PR
+template (including the pre-existing-failures note above). Also want to re-read
+`docs/CONTRIBUTING.md` once more for docstring conventions before opening the PR.
+
+**Blockers:**
+None — the only snag was the local pre-commit hook (ruff/mypy) failing on
+pre-existing issues in the files I touched; resolved with minimal, behavior-preserving
+type annotations rather than skipping the hook.
+
+---
+
+### Check-in 2 (end of week)
+
+**PR link:** [link to your submitted pull request]
+
+**Branch:** [the branch name you worked on, e.g. `fix/123-short-description`]
+
+**What you built:**
+[1–3 sentences summarizing what your fix does and how it works]
+
+**Tests added or updated:**
+[Which test files did you touch? What do they cover?]
+
+**Self-review confirmation:** [ ] make check passes [ ] make test-unit passes
+
+**Draft PR feedback received from:** [name or Slack handle, or "none"]
