@@ -137,3 +137,82 @@ against a pre-change baseline of 53 failed/375 passed; this branch is 40 failed/
 passed, so no new failures and 13 fewer than baseline)
 
 **Draft PR feedback received from:** none yet
+
+## Week 10 — Iteration & reflection
+
+### Reviewer feedback
+
+**Feedback received:** [ ] Yes [X] No — Su26 note: reviewer feedback is not a
+feature this term, so no review is expected on PR #912.
+
+**Summary of feedback:**
+No feedback came in — reviewer feedback is not enabled for Summer 2026, per
+the course note for this week. PR #912 remains open with no comments.
+
+**How you responded:**
+N/A — nothing to respond to. In its absence, I did my own second pass on the
+diff before finalizing Week 9's Check-in 2 (re-reading `create_review()`,
+`create_review_endpoint()`, and the new/updated tests end to end) to catch
+anything a reviewer likely would have flagged.
+
+---
+
+### Reflection
+
+**What was harder than you expected?**
+Telling apart "my change broke this" from "this was already broken" was
+harder than I expected. When `make test-unit` came back 40 failed / 389
+passed after my change, my first instinct was that I'd introduced 40
+regressions. It took running the full suite against the unmodified branch
+(53 failed / 375 passed) to see that my change actually netted 13 _fewer_
+failures, because replacing `AsyncMock().scalars()` with `Mock()` in
+`test_review_service.py` incidentally fixed a mock-quirk that was failing
+unrelated tests. Without that baseline comparison I would have either
+panicked or, worse, tried to "fix" failures that had nothing to do with
+issue #163. The 403-vs-404 decision was a smaller version of the same
+problem: it wasn't obvious until I checked that `get_review()` already used
+404 for the equivalent case, so consistency with the existing pattern
+settled it rather than my own judgment.
+
+**What did you learn about working in a large codebase?**
+The biggest lesson was that the fix was already half-written elsewhere in
+the file. `get_review()` and `list_reviews()` in `review_service.py` already
+filtered by `Profile.user_id` — the bug was that `create_review()` never
+called the equivalent `profile_service.get_profile(db, profile_id,
+user_id)` check. In my own projects I'd probably have written a fresh
+ownership check inline; here, reusing the existing helper kept the fix
+small and consistent with the codebase's conventions instead of adding a
+second way of doing the same thing. I also learned to draw a hard line
+around scope — I was tempted to fix all 40 pre-existing failures
+(bias_detector, pii_scrubber, tech_detector) since I was already in the
+test suite, but they were unrelated to #163 and touching them would have
+bloated the PR and made it harder to review, so I documented them instead
+of fixing them.
+
+**How did AI tools help — and where did they fall short?**
+AI assistance was most useful for the mechanical parts: scaffolding the
+reproduction script that called `create_review()` directly with a
+mismatched `user_id`/`profile_id` pair, and drafting the regression test
+`test_create_review_returns_none_for_unauthorized_profile` to match the
+existing test file's mocking conventions. It fell short on the judgment
+calls — deciding 404 vs. 403, deciding whether the pre-existing
+`AsyncMock().scalars()` failures were in scope to fix, and reasoning
+through the `User.id`/`Review.id` `str`-vs-`UUID` mypy gaps so the fix was
+correct rather than just quiet. Those needed me to actually read the
+surrounding code and the codebase's own precedent, not just generate
+something plausible.
+
+**What would you do differently if you started over?**
+I'd establish the pre-existing-failures baseline (`make test-unit` on the
+unmodified branch) in Week 8 during reproduction, not in Week 9 right
+before the PR. I ended up doing it reactively once I saw 40 failures and
+got worried, but doing it up front would have saved the mid-week scramble
+and let me state "N pre-existing failures, none touching review/profile
+code" with confidence from the start instead of backfilling the evidence.
+
+**What are you most proud of from this module?**
+Catching that my fix incidentally repaired 13 unrelated test failures, and
+resisting the urge to expand the PR to "clean up" the other 40 — instead
+documenting both clearly in the PR description. That distinction between
+what's honestly in scope and what's just nearby felt like the most
+professional judgment call of the whole four weeks.
